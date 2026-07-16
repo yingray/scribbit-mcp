@@ -1,0 +1,12 @@
+{
+  "name": "scribbit",
+  "description": "Scribbit meeting-AI tools for Claude Code.",
+  "owner": { "name": "Ray Lu" },
+  "plugins": [
+    {
+      "name": "scribbit-mcp",
+      "source": "./plugins/scribbit-mcp",
+      "description": "Scribbit meeting-AI MCP server: list/search meetings, read transcripts and summaries, and browse decisions. Authorizes via a device flow on first use."
+    }
+  ]
+}
