@@ -21614,6 +21614,21 @@ var ApiClient = class {
     if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
     return await response.json();
   }
+  async listGoogleConnections() {
+    const response = await this.request("/integrations/google/connections");
+    if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
+    return await response.json();
+  }
+  // Pull new recordings for one connection. `since` must be plain UTC (the API's
+  // validator rejects offset-bearing instants).
+  async syncGoogle(connectionId, opts = {}) {
+    const response = await this.request("/integrations/google/sync", {
+      method: "POST",
+      body: JSON.stringify({ connectionId, ...opts.since ? { since: opts.since } : {} })
+    });
+    if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
+    return await response.json();
+  }
   // Both artifact routes answer 404 for two different situations, told apart by the
   // body: `{ status }` means the meeting exists but the pipeline has not produced
   // this file yet; `{ error: 'meeting not found' }` means there is no such meeting.
@@ -21634,13 +21649,14 @@ var ApiClient = class {
     }
     throw new ApiHttpError(response.status, await readBody(response));
   }
-  async request(path) {
+  async request(path, init = {}) {
     const headers = { accept: "application/json" };
+    if (init.body !== void 0) headers["content-type"] = "application/json";
     if (this.token) headers.authorization = `Bearer ${this.token}`;
     else if (this.cookie) headers.cookie = this.cookie;
     let response;
     try {
-      response = await this.fetch(`${this.baseUrl}${path}`, { headers });
+      response = await this.fetch(`${this.baseUrl}${path}`, { ...init, headers });
     } catch (error2) {
       if (isNetworkError(error2)) throw new ApiUnreachableError(this.baseUrl);
       throw error2;
@@ -21865,6 +21881,9 @@ var listDecisionsSchema = {
   minConfidence: external_exports.number().min(0).max(1).optional().describe("Minimum extraction confidence (default 0.8).")
 };
 var getDecisionSchema = { decisionId: external_exports.string().min(1).describe("Decision id from list_decisions.") };
+var syncMeetingsSchema = {
+  since: instant("Pull meetings that started at or after this instant. Default: the server's lookback window.").optional()
+};
 var listDecisions = async (client, args) => {
   const decisions = await client.listDecisions(args);
   if (decisions.length === 0) return text("No published decisions matched those filters.");
@@ -22010,6 +22029,41 @@ var searchTranscripts = async (client, args) => {
   if (dropped) lines.push("", "(More matches exist. Narrow the search with meetingId or since.)");
   return text(lines.join("\n"));
 };
+var syncMeetings = async (client, args) => {
+  let connections;
+  try {
+    connections = await client.listGoogleConnections();
+  } catch (error2) {
+    if (error2 instanceof ApiHttpError && error2.status === 503) {
+      return text("Google integration is not configured on this Scribbit server.", true);
+    }
+    throw error2;
+  }
+  if (connections.length === 0) {
+    return text("No Google account is connected. Connect one in the Scribbit app (Settings) first.", true);
+  }
+  const since = args.since ? new Date(args.since).toISOString() : void 0;
+  let createdCount = 0;
+  let awaitingCount = 0;
+  let skipped = 0;
+  const failures = [];
+  for (const connection of connections) {
+    const result = await client.syncGoogle(connection.id, { since });
+    createdCount += result.createdCount;
+    awaitingCount += result.awaitingCount;
+    skipped += result.skipped;
+    failures.push(...result.failures.map((f) => `- ${connection.email} / ${f.providerMeetingId}: ${f.error}`));
+  }
+  const accounts = connections.map((c) => c.email).join(", ");
+  const lines = [
+    `Synced ${accounts}: ${createdCount} new meeting(s), ${awaitingCount} awaiting their recording, ${skipped} already known.`
+  ];
+  if (createdCount > 0) {
+    lines.push(`New meetings show in list_meetings, unprocessed. ${NOT_STARTED}`);
+  }
+  if (failures.length > 0) lines.push("Failures:", ...failures);
+  return text(lines.join("\n"));
+};
 var guard = async (client, run, deviceAuth) => {
   try {
     return await run();
@@ -22078,6 +22132,14 @@ var registerTools = (server, client, deviceAuth) => {
       inputSchema: getDecisionSchema
     },
     async (args) => guard(client, () => getDecision(client, args), deviceAuth)
+  );
+  server.registerTool(
+    "sync_meetings",
+    {
+      description: "Pull newly recorded meetings from the connected Google account(s) into Scribbit (Meet recordings discovered via Calendar). Use when a recent meeting is missing from list_meetings. Meetings whose recording Google has not delivered yet are counted as awaiting; synced meetings are listed but not transcribed until someone generates subtitles in the Scribbit app.",
+      inputSchema: syncMeetingsSchema
+    },
+    async (args) => guard(client, () => syncMeetings(client, args), deviceAuth)
   );
 };
 
