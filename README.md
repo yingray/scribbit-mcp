@@ -50,13 +50,14 @@ You can also skip the device flow by issuing a personal access token in the web 
 - `get_decision` — a single decision by id
 - `search_transcripts` — full-text search across transcripts
 - `sync_meetings` — pull newly recorded Meet meetings from the connected Google account(s)
+- `process_meeting` — start processing a meeting (download, transcribe, summarize)
 
 ## Provenance
 
 This bundle is generated from the Scribbit monorepo — it is not hand-edited here.
 
 - Source: https://github.com/yingray/scribbit
-- Built from commit: `fb494969ec4f3329e20265b524b457f2c5511a44`
+- Built from commit: `85f0ca2fc48ca7d455d26be88a8bf3f5a67b54e0`
 - Third-party licenses for bundled dependencies: [`plugins/scribbit-mcp/dist/THIRD_PARTY_LICENSES.txt`](plugins/scribbit-mcp/dist/THIRD_PARTY_LICENSES.txt)
 
 To rebuild: run `pnpm --filter @scribbit/mcp build:plugin` in the monorepo and copy
