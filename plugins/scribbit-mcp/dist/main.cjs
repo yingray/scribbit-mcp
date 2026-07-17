@@ -21629,6 +21629,20 @@ var ApiClient = class {
     if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
     return await response.json();
   }
+  // Kick the processing pipeline for one meeting. The API picks the restart stage
+  // (re-download, extract audio, or transcribe) from what is still stored.
+  async retryMeeting(meetingId) {
+    const response = await this.request(`/meetings/${encodeURIComponent(meetingId)}/retry`, { method: "POST" });
+    if (response.status === 404) return { kind: "not-found" };
+    if (response.status === 409) {
+      const body = await readBody(response);
+      const parsed = safeJson(body);
+      return { kind: "conflict", reason: typeof parsed?.error === "string" ? parsed.error : body };
+    }
+    if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
+    const { stage } = await response.json();
+    return { kind: "ok", stage };
+  }
   // Both artifact routes answer 404 for two different situations, told apart by the
   // body: `{ status }` means the meeting exists but the pipeline has not produced
   // this file yet; `{ error: 'meeting not found' }` means there is no such meeting.
@@ -21884,6 +21898,9 @@ var getDecisionSchema = { decisionId: external_exports.string().min(1).describe(
 var syncMeetingsSchema = {
   since: instant("Pull meetings that started at or after this instant. Default: the server's lookback window.").optional()
 };
+var processMeetingSchema = {
+  meetingId: external_exports.string().min(1).describe("Meeting id from list_meetings.")
+};
 var listDecisions = async (client, args) => {
   const decisions = await client.listDecisions(args);
   if (decisions.length === 0) return text("No published decisions matched those filters.");
@@ -21927,11 +21944,11 @@ var listMeetings = async (client, args) => {
   const header = `${shown.length} meeting(s), newest first:`;
   return text([header, ...shown.map(meetingLine)].join("\n"));
 };
-var NOT_STARTED = "This meeting has not been processed yet - generate subtitles for it in the Scribbit app first.";
+var NOT_STARTED = "This meeting has not been processed yet - start it with process_meeting.";
 var TRANSCRIPT_MAY_EXIST = /* @__PURE__ */ new Set(["transcribed", "correcting", "summarizing"]);
 var adviceFor = (status, meetingId) => {
   if (status === "created") return NOT_STARTED;
-  if (status === "failed") return "Processing failed. Retry it in the Scribbit app.";
+  if (status === "failed") return "Processing failed. Retry it with process_meeting.";
   if (TRANSCRIPT_MAY_EXIST.has(status)) {
     return `The transcript is already written - call get_transcript with id ${meetingId} to read the discussion now.`;
   }
@@ -22064,6 +22081,29 @@ var syncMeetings = async (client, args) => {
   if (failures.length > 0) lines.push("Failures:", ...failures);
   return text(lines.join("\n"));
 };
+var STAGE_STARTED = {
+  ingest: "Started by re-downloading the recording from Google",
+  extract_audio: "Started from audio extraction",
+  transcribe: "Started from transcription"
+};
+var processMeeting = async (client, args) => {
+  const result = await client.retryMeeting(args.meetingId);
+  if (result.kind === "not-found") {
+    return text(`No meeting found with id ${args.meetingId}. Use list_meetings to get valid ids.`, true);
+  }
+  if (result.kind === "conflict") {
+    if (result.reason.includes("no video or audio artifact")) {
+      return text(
+        "Google has not delivered the recording for this meeting yet (recordings appear with a delay after the meeting ends). Run sync_meetings again later; processing cannot start before the recording exists.",
+        true
+      );
+    }
+    return text(`Cannot process this meeting: ${result.reason}`, true);
+  }
+  return text(
+    `${STAGE_STARTED[result.stage] ?? `Started (stage: ${result.stage})`}. Transcription and summarization take a few minutes - check get_summary for progress.`
+  );
+};
 var guard = async (client, run, deviceAuth) => {
   try {
     return await run();
@@ -22136,10 +22176,18 @@ var registerTools = (server, client, deviceAuth) => {
   server.registerTool(
     "sync_meetings",
     {
-      description: "Pull newly recorded meetings from the connected Google account(s) into Scribbit (Meet recordings discovered via Calendar). Use when a recent meeting is missing from list_meetings. Meetings whose recording Google has not delivered yet are counted as awaiting; synced meetings are listed but not transcribed until someone generates subtitles in the Scribbit app.",
+      description: "Pull newly recorded meetings from the connected Google account(s) into Scribbit (Meet recordings discovered via Calendar). Use when a recent meeting is missing from list_meetings. Meetings whose recording Google has not delivered yet are counted as awaiting; synced meetings are listed but not transcribed until they are processed (see process_meeting).",
       inputSchema: syncMeetingsSchema
     },
     async (args) => guard(client, () => syncMeetings(client, args), deviceAuth)
+  );
+  server.registerTool(
+    "process_meeting",
+    {
+      description: "Start processing one meeting: download its recording if needed, then transcribe, correct subtitles, summarize, and extract decisions. Use when get_summary or get_transcript report a meeting as not processed yet. This spends real compute and takes minutes, so confirm with the user before triggering it and process one meeting at a time; check get_summary afterwards for progress.",
+      inputSchema: processMeetingSchema
+    },
+    async (args) => guard(client, () => processMeeting(client, args), deviceAuth)
   );
 };
 
