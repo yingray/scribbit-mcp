@@ -21597,23 +21597,6 @@ var ApiClient = class {
   async getTranscript(meetingId) {
     return this.fetchArtifact(`/meetings/${encodeURIComponent(meetingId)}/transcript.json`);
   }
-  async listDecisions(input = {}) {
-    const params = new URLSearchParams();
-    if (input.meetingId) params.set("meetingId", input.meetingId);
-    if (input.projectId) params.set("projectId", input.projectId);
-    if (input.kind) params.set("kind", input.kind);
-    if (input.tag) params.set("tag", input.tag);
-    if (input.minConfidence !== void 0) params.set("minConfidence", String(input.minConfidence));
-    const response = await this.request(`/v1/decisions${params.size ? `?${params}` : ""}`);
-    if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
-    return (await response.json()).decisions;
-  }
-  async getDecision(id) {
-    const response = await this.request(`/v1/decisions/${encodeURIComponent(id)}`);
-    if (response.status === 404) return void 0;
-    if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
-    return await response.json();
-  }
   async listGoogleConnections() {
     const response = await this.request("/integrations/google/connections");
     if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
@@ -21851,7 +21834,6 @@ var formatSummary = (summary) => {
       lines.push(`- [${secondsToHms(chapter.startSeconds)}] ${chapter.title}${recap}`);
     }
   }
-  lines.push("", "Decisions and action items are canonical records: use list_decisions.");
   return lines.join("\n");
 };
 var searchHit = (segments, index) => {
@@ -21887,45 +21869,11 @@ var searchTranscriptsSchema = {
   since: instant("Only search meetings at or after this instant. Ignored when meetingId is given.").optional(),
   maxMeetings: external_exports.number().int().min(1).max(50).optional().describe("Cap on meetings scanned (default 20).")
 };
-var listDecisionsSchema = {
-  meetingId: external_exports.string().optional().describe("Restrict decisions to one meeting."),
-  projectId: external_exports.string().optional().describe("Restrict decisions to one project (default project is inbox)."),
-  kind: external_exports.enum(["decision", "action_item"]).optional().describe("Filter by item kind: a made decision or a follow-up action item."),
-  tag: external_exports.string().optional().describe('Filter by topic tag (lowercase, e.g. "pricing").'),
-  minConfidence: external_exports.number().min(0).max(1).optional().describe("Minimum extraction confidence (default 0.8).")
-};
-var getDecisionSchema = { decisionId: external_exports.string().min(1).describe("Decision id from list_decisions.") };
 var syncMeetingsSchema = {
   since: instant("Pull meetings that started at or after this instant. Default: the server's lookback window.").optional()
 };
 var processMeetingSchema = {
   meetingId: external_exports.string().min(1).describe("Meeting id from list_meetings.")
-};
-var listDecisions = async (client, args) => {
-  const decisions = await client.listDecisions(args);
-  if (decisions.length === 0) return text("No published decisions matched those filters.");
-  return text(decisions.map((decision) => {
-    const citation = decision.evidence[0];
-    const source = citation ? `
-  Source: ${citation.speakerName ? `${citation.speakerName}: ` : ""}"${citation.quote}" at ${citation.occurredAt}` : "";
-    const tags = decision.tags.length ? ` #${decision.tags.join(" #")}` : "";
-    return `- [${decision.kind}] ${decision.statement}${tags} (confidence ${decision.confidence.toFixed(2)}, id: ${decision.id})${source}`;
-  }).join("\n"));
-};
-var getDecision = async (client, args) => {
-  const decision = await client.getDecision(args.decisionId);
-  if (!decision) return text(`No decision found with id ${args.decisionId}.`, true);
-  const evidence = decision.evidence.map(
-    (entry) => `- ${entry.occurredAt}${entry.speakerName ? ` \u2014 ${entry.speakerName}` : ""}: "${entry.quote}"`
-  );
-  return text([
-    decision.statement,
-    `Confidence: ${decision.confidence.toFixed(2)}`,
-    `Status: ${decision.status}`,
-    decision.rationale ? `Rationale: ${decision.rationale}` : "",
-    "Evidence:",
-    ...evidence
-  ].filter(Boolean).join("\n"));
 };
 var inWindow = (meeting, since, until) => {
   const at = Date.parse(meetingTime(meeting));
@@ -22136,7 +22084,7 @@ var registerTools = (server, client, deviceAuth) => {
   server.registerTool(
     "get_summary",
     {
-      description: 'Get the AI summary of one meeting by id: overview, key points, and chapters. Decisions and action items live in list_decisions. This is the primary way to answer "what did we discuss". If the meeting is not summarized yet, this reports the current pipeline status and tells you to try get_transcript instead.',
+      description: 'Get the AI summary of one meeting by id: overview, key points, and chapters. This is the primary way to answer "what did we discuss". If the meeting is not summarized yet, this reports the current pipeline status and tells you to try get_transcript instead.',
       inputSchema: getSummarySchema
     },
     async (args) => guard(client, () => getSummary(client, args), deviceAuth)
@@ -22158,22 +22106,6 @@ var registerTools = (server, client, deviceAuth) => {
     async (args) => guard(client, () => searchTranscripts(client, args), deviceAuth)
   );
   server.registerTool(
-    "list_decisions",
-    {
-      description: "List canonical published meeting decisions and action items with confidence, topic tags, and source citations. Filter by meeting, kind, or tag.",
-      inputSchema: listDecisionsSchema
-    },
-    async (args) => guard(client, () => listDecisions(client, args), deviceAuth)
-  );
-  server.registerTool(
-    "get_decision",
-    {
-      description: "Get one canonical decision and its exact transcript evidence.",
-      inputSchema: getDecisionSchema
-    },
-    async (args) => guard(client, () => getDecision(client, args), deviceAuth)
-  );
-  server.registerTool(
     "sync_meetings",
     {
       description: "Pull newly recorded meetings from the connected Google account(s) into Scribbit (Meet recordings discovered via Calendar). Use when a recent meeting is missing from list_meetings. Meetings whose recording Google has not delivered yet are counted as awaiting; synced meetings are listed but not transcribed until they are processed (see process_meeting).",
@@ -22184,7 +22116,7 @@ var registerTools = (server, client, deviceAuth) => {
   server.registerTool(
     "process_meeting",
     {
-      description: "Start processing one meeting: download its recording if needed, then transcribe, correct subtitles, summarize, and extract decisions. Use when get_summary or get_transcript report a meeting as not processed yet. This spends real compute and takes minutes, so confirm with the user before triggering it and process one meeting at a time; check get_summary afterwards for progress.",
+      description: "Start processing one meeting: download its recording if needed, then transcribe, correct subtitles, and summarize. Use when get_summary or get_transcript report a meeting as not processed yet. This spends real compute and takes minutes, so confirm with the user before triggering it and process one meeting at a time; check get_summary afterwards for progress.",
       inputSchema: processMeetingSchema
     },
     async (args) => guard(client, () => processMeeting(client, args), deviceAuth)

@@ -1,7 +1,7 @@
 # Scribbit MCP plugin
 
 A Claude Code plugin that connects to a [Scribbit](https://github.com/yingray/scribbit)
-meeting-AI API and exposes its meetings, transcripts, summaries, and decisions as MCP
+meeting-AI API and exposes its meetings, transcripts, and summaries as MCP
 tools. The server is a single self-contained bundle — no monorepo checkout, no
 `pnpm install`, no build step on your side.
 
@@ -46,8 +46,6 @@ You can also skip the device flow by issuing a personal access token in the web 
 - `list_meetings` — recent meetings
 - `get_summary` — a meeting's summary
 - `get_transcript` — a meeting's transcript
-- `list_decisions` — canonical decisions, filterable by meeting/project/kind/tag
-- `get_decision` — a single decision by id
 - `search_transcripts` — full-text search across transcripts
 - `sync_meetings` — pull newly recorded Meet meetings from the connected Google account(s)
 - `process_meeting` — start processing a meeting (download, transcribe, summarize)
@@ -57,7 +55,7 @@ You can also skip the device flow by issuing a personal access token in the web 
 This bundle is generated from the Scribbit monorepo — it is not hand-edited here.
 
 - Source: https://github.com/yingray/scribbit
-- Built from commit: `85f0ca2fc48ca7d455d26be88a8bf3f5a67b54e0`
+- Built from commit: `6d3af23b9ff3aa02a52b2ed6aaf6d1080fc7a925`
 - Third-party licenses for bundled dependencies: [`plugins/scribbit-mcp/dist/THIRD_PARTY_LICENSES.txt`](plugins/scribbit-mcp/dist/THIRD_PARTY_LICENSES.txt)
 
 To rebuild: run `pnpm --filter @scribbit/mcp build:plugin` in the monorepo and copy

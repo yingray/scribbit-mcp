@@ -6,7 +6,7 @@
     {
       "name": "scribbit-mcp",
       "source": "./plugins/scribbit-mcp",
-      "description": "Scribbit meeting-AI MCP server: list/search meetings, read transcripts and summaries, and browse decisions. Authorizes via a device flow on first use."
+      "description": "Scribbit meeting-AI MCP server: list/search meetings and read transcripts and summaries. Authorizes via a device flow on first use."
     }
   ]
 }
