@@ -1,4 +1,4 @@
 source: https://github.com/yingray/scribbit
-commit: 6d3af23b9ff3aa02a52b2ed6aaf6d1080fc7a925
+commit: 4da4022cef07ebee02838418bcf55fdf6b044d1d
 node_min: 18
 format: cjs

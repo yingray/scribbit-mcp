@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "scribbit": {
+      "command": "node",
+      "args": ["./dist/main.cjs"],
+      "cwd": ".",
+      "env_vars": ["SCRIBBIT_API_BASE", "SCRIBBIT_API_TOKEN"]
+    }
+  }
+}

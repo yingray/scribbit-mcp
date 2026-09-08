@@ -1,6 +1,6 @@
 {
   "name": "scribbit",
-  "description": "Scribbit meeting-AI tools for Claude Code.",
+  "description": "Scribbit meeting-AI tools for Claude Code and Codex.",
   "owner": { "name": "Ray Lu" },
   "plugins": [
     {

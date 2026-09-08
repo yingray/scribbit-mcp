@@ -1,0 +1,11 @@
+{
+  "name": "scribbit",
+  "interface": { "displayName": "Scribbit" },
+  "plugins": [
+    {
+      "name": "scribbit-mcp",
+      "source": { "source": "local", "path": "./plugins/scribbit-mcp" },
+      "category": "Productivity"
+    }
+  ]
+}
