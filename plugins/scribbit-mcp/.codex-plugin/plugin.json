@@ -1,0 +1,17 @@
+{
+  "name": "scribbit-mcp",
+  "version": "0.3.0",
+  "description": "Scribbit meeting-AI MCP server: list/search meetings and read transcripts and summaries. Authorizes via a device flow on first use.",
+  "author": { "name": "Ray Lu" },
+  "homepage": "https://github.com/yingray/scribbit-mcp",
+  "repository": "https://github.com/yingray/scribbit-mcp",
+  "license": "Apache-2.0",
+  "keywords": ["meetings", "transcripts", "mcp"],
+  "mcpServers": "./codex.mcp.json",
+  "interface": {
+    "displayName": "Scribbit",
+    "shortDescription": "Meetings, transcripts, and summaries from Scribbit",
+    "developerName": "Ray Lu",
+    "category": "Productivity"
+  }
+}
