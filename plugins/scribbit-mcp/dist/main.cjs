@@ -21569,7 +21569,7 @@ var ApiClient = class {
   }
   // Device authorization: ask the API to start a request. Public endpoint.
   async authorizeDevice() {
-    return this.postJson("/v1/device/authorize", {});
+    return this.postJson("/v1/device/authorize", { client_name: "Scribbit MCP" });
   }
   // Poll for the token. Public endpoint; the device_code is the secret.
   async pollDeviceToken(deviceCode) {
@@ -21577,6 +21577,13 @@ var ApiClient = class {
   }
   get base() {
     return this.baseUrl;
+  }
+  // Who the API thinks we are. Throws ApiUnauthorizedError when login is on and
+  // we have no usable credential.
+  async getMe() {
+    const response = await this.request("/auth/me");
+    if (!response.ok) throw new ApiHttpError(response.status, await readBody(response));
+    return await response.json();
   }
   async listMeetings() {
     const response = await this.request("/meetings");
@@ -21756,7 +21763,7 @@ var DeviceAuthenticator = class {
     }
   }
   message(uri, userCode) {
-    return `This Scribbit MCP server is not authorized yet. Open ${uri} in a browser, sign in, and approve code ${userCode}. Then call this tool again \u2014 it works as soon as you approve.`;
+    return `This Scribbit MCP server is not authorized yet. Open ${uri} in a browser, sign in, and approve code ${userCode}. Then call this tool again \u2014 it works as soon as you approve. Show this link to the user; you cannot approve it yourself.`;
   }
   startPolling(deviceCode, intervalSeconds) {
     if (this.polling) return;
@@ -21812,7 +21819,9 @@ var transcriptText = (segments) => segments.map((segment) => segment.text.trim()
 var NOTE = {
   completed: "",
   created: " (not processed yet)",
-  failed: " (processing failed)"
+  failed: " (processing failed)",
+  awaiting_recording: " (recording not on Drive yet)",
+  no_recording: " (no recording was made; nothing to transcribe)"
 };
 var meetingLine = (meeting) => {
   const note = NOTE[meeting.status] ?? " (still processing)";
@@ -21894,8 +21903,11 @@ var listMeetings = async (client, args) => {
 };
 var NOT_STARTED = "This meeting has not been processed yet - start it with process_meeting.";
 var TRANSCRIPT_MAY_EXIST = /* @__PURE__ */ new Set(["transcribed", "correcting", "summarizing"]);
+var NO_RECORDING = "This meeting was never recorded, so it has no transcript or summary. Skip it.";
 var adviceFor = (status, meetingId) => {
   if (status === "created") return NOT_STARTED;
+  if (status === "no_recording") return NO_RECORDING;
+  if (status === "awaiting_recording") return "The recording is not on Drive yet. Try again later.";
   if (status === "failed") return "Processing failed. Retry it with process_meeting.";
   if (TRANSCRIPT_MAY_EXIST.has(status)) {
     return `The transcript is already written - call get_transcript with id ${meetingId} to read the discussion now.`;
@@ -21918,7 +21930,7 @@ var getTranscript = async (client, args) => {
     return text(`No meeting found with id ${args.meetingId}. Use list_meetings to get valid ids.`, true);
   }
   if (result.kind === "not-ready") {
-    const advice = result.status === "created" ? ` ${NOT_STARTED}` : "";
+    const advice = result.status === "created" ? ` ${NOT_STARTED}` : result.status === "no_recording" ? ` ${NO_RECORDING}` : "";
     return text(`Transcript not available yet (status: ${result.status}).${advice}`);
   }
   const { language, durationSeconds, segments } = result.value;
@@ -22052,12 +22064,22 @@ var processMeeting = async (client, args) => {
     `${STAGE_STARTED[result.stage] ?? `Started (stage: ${result.stage})`}. Transcription and summarization take a few minutes - check get_summary for progress.`
   );
 };
+var serverInstructions = (apiBase) => `Scribbit holds the user's recorded meetings, transcripts, and summaries. This server talks to the Scribbit API at ${apiBase}, set by SCRIBBIT_API_BASE (default http://localhost:3000). To check the connection or sign in, call auth_status. Sign-in uses a device flow: a tool returns a link, the user opens it and approves in the browser, then the tool works on the next call. The token is saved, so this happens once. Instead of the device flow, the user can set SCRIBBIT_API_TOKEN to a personal access token from the Scribbit web app (Settings -> API tokens). Changes to SCRIBBIT_API_BASE or SCRIBBIT_API_TOKEN need a client restart.`;
+var authStatus = async (client) => {
+  const me = await client.getMe();
+  if (!me.loginRequired) return text(`Connected to the Scribbit API at ${client.base}. This API has login off.`);
+  const who = me.user?.email ? ` as ${me.user.email}` : "";
+  return text(`Connected to the Scribbit API at ${client.base}, signed in${who}.`);
+};
 var guard = async (client, run, deviceAuth) => {
   try {
     return await run();
   } catch (error2) {
     if (error2 instanceof ApiUnreachableError) {
-      return text(`Cannot reach the Scribbit API at ${client.base}. Is it running? Start it with 'pnpm dev:api'.`, true);
+      return text(
+        `Cannot reach the Scribbit API at ${client.base}. This server reads the API URL from SCRIBBIT_API_BASE (default http://localhost:3000). Ask the user for their Scribbit API URL, set SCRIBBIT_API_BASE in the environment that starts this MCP client, and restart the client. If the user runs Scribbit locally, start the API with 'pnpm dev:api'.`,
+        true
+      );
     }
     if (error2 instanceof ApiUnauthorizedError) {
       if (deviceAuth) return text(await deviceAuth.ensurePendingMessage(), true);
@@ -22066,6 +22088,9 @@ var guard = async (client, run, deviceAuth) => {
         true
       );
     }
+    if (error2 instanceof ApiHttpError && error2.status === 403) {
+      return text("Access denied. This account or resource is not allowed by the Scribbit API.", true);
+    }
     if (error2 instanceof ApiHttpError) {
       return text(`API returned HTTP ${error2.status}: ${error2.body.slice(0, 200)}`, true);
     }
@@ -22073,6 +22098,14 @@ var guard = async (client, run, deviceAuth) => {
   }
 };
 var registerTools = (server, client, deviceAuth) => {
+  server.registerTool(
+    "auth_status",
+    {
+      description: "Check the connection to the Scribbit API and sign in. Call this first when the user asks to set up, log in to, or authorize Scribbit, or when another tool fails. If the server is not signed in, this starts sign-in and returns a link: show it to the user, wait until they approve it in the browser, then call this again to confirm.",
+      inputSchema: {}
+    },
+    async () => guard(client, () => authStatus(client), deviceAuth)
+  );
   server.registerTool(
     "list_meetings",
     {
@@ -22138,7 +22171,10 @@ var main = async () => {
     if (stored) client.setToken(stored);
   }
   const deviceAuth = new DeviceAuthenticator(client, config2.apiBase, config2.tokenFile);
-  const server = new McpServer({ name: "scribbit", version: "0.0.0" });
+  const server = new McpServer(
+    { name: "scribbit", version: "0.0.0" },
+    { instructions: serverInstructions(config2.apiBase) }
+  );
   registerTools(server, client, deviceAuth);
   await server.connect(new StdioServerTransport());
   const auth = client.hasToken() ? "with API token" : config2.sessionCookie ? "with session cookie" : "unauthenticated (will run device flow on first use)";
