@@ -53,15 +53,23 @@ file in your project is not read. Use the environment variables instead.
 
 ## Authentication
 
-On the first tool call against a login-enabled API the server runs a **device-flow**
-authorization: it prints a link, you sign in and approve it in the Scribbit web app,
-and the token is saved to `~/.config/scribbit/token.json` so you only do it once.
+The agent can sign you in. Ask it to "log in to Scribbit", or let it call `auth_status`.
+
+1. On the first call against a login-enabled API, the server starts a **device-flow**
+   authorization and returns a link to the agent.
+2. The agent shows you the link. Open it, sign in, and approve the request in the Scribbit
+   web app.
+3. The server saves the token to `~/.config/scribbit/token.json`, so you do this only once.
+
+If the agent reports "Cannot reach the Scribbit API at http://localhost:3000", the server
+uses the default URL. Set `SCRIBBIT_API_BASE` (see above) and restart the client.
 
 You can also skip the device flow by issuing a personal access token in the web app
 (**Settings -> API tokens**) and exporting it as `SCRIBBIT_API_TOKEN`.
 
 ## Tools
 
+- `auth_status` — check the API connection and sign in (returns the sign-in link when needed)
 - `list_meetings` — recent meetings
 - `get_summary` — a meeting's summary
 - `get_transcript` — a meeting's transcript
@@ -86,7 +94,7 @@ field, so the two MCP configs stay separate. Both launch the same `dist/main.cjs
 This bundle is generated from the Scribbit monorepo — it is not hand-edited here.
 
 - Source: https://github.com/yingray/scribbit
-- Built from commit: `4da4022cef07ebee02838418bcf55fdf6b044d1d`
+- Built from commit: `8cd19104ac8fd3ecbe749e5f4b17fa35c56f9b09`
 - Third-party licenses for bundled dependencies: [`plugins/scribbit-mcp/dist/THIRD_PARTY_LICENSES.txt`](plugins/scribbit-mcp/dist/THIRD_PARTY_LICENSES.txt)
 
 To rebuild: run `pnpm --filter @scribbit/mcp build:plugin` in the monorepo and copy
